@@ -243,24 +243,90 @@ prepareBeep();
 
   try {
 
-    html5QrCode = new Html5Qrcode("reader");
+  html5QrCode = new Html5Qrcode(
+  "reader",
+  {
+    formatsToSupport: [
+      Html5QrcodeSupportedFormats.QR_CODE,
+      Html5QrcodeSupportedFormats.CODE_128
+    ],
+
+    useBarCodeDetectorIfSupported: true
+  }
+);
 
     scannerRunning = true;
 
-   await html5QrCode.start(
+  await html5QrCode.start(
 
   {
     facingMode: "environment"
   },
 
   {
-    fps: 15
+    fps: 10,
+
+    disableFlip: true,
+
+    videoConstraints: {
+
+      facingMode: {
+        ideal: "environment"
+      },
+
+      width: {
+        ideal: 1920
+      },
+
+      height: {
+        ideal: 1080
+      },
+
+      frameRate: {
+        ideal: 30,
+        max: 30
+      }
+
+    }
+
   },
 
   onScanSuccess,
 
   onScanFailure
 );
+
+// ===== CỐ GẮNG BẬT AUTOFOCUS =====
+try {
+
+  const capabilities =
+    html5QrCode.getRunningTrackCapabilities();
+
+  if (
+    capabilities.focusMode &&
+    capabilities.focusMode.includes("continuous")
+  ) {
+
+    await html5QrCode.applyVideoConstraints({
+
+      advanced: [
+        {
+          focusMode: "continuous"
+        }
+      ]
+
+    });
+
+  }
+
+} catch (error) {
+
+  console.log(
+    "Thiết bị không hỗ trợ chỉnh autofocus:",
+    error
+  );
+
+}
 
     setStatus(
       '📷 Camera quét đã mở\n' +
