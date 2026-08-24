@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kho - Hàng hoàn</title>
+<style>
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  padding: 20px;
+  background: #f3f6fa;
+  font-family: Arial, sans-serif;
+}
+.container { max-width: 600px; margin: auto; }
+.card {
+  background: white;
+  padding: 20px;
+  border-radius: 18px;
+  box-shadow: 0 5px 20px rgba(0,0,0,.08);
+}
+h1 { text-align: center; margin-top: 0; }
+label {
+  display: block;
+  font-weight: bold;
+  margin-top: 15px;
+  margin-bottom: 6px;
+}
+input {
+  width: 100%;
+  padding: 14px;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  font-size: 16px;
+}
+video {
+  width: 100%;
+  margin-top: 15px;
+  border-radius: 12px;
+  background: black;
+  max-height: 360px;
+}
+button {
+  width: 100%;
+  padding: 14px;
+  margin-top: 12px;
+  border: 0;
+  border-radius: 10px;
+  font-size: 16px;
+  font-weight: bold;
+  color: white;
+  background: #2563eb;
+  cursor: pointer;
+}
+button:disabled { background: #aaa; cursor: not-allowed; }
+.result { display: flex; gap: 10px; }
+.result button { flex: 1; }
+.correct { background: #16a34a; }
+.wrong { background: #dc2626; }
+.selected { outline: 4px solid #93c5fd; }
+#status {
+  margin-top: 15px;
+  padding: 12px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  white-space: pre-line;
+  font-size: 14px;
+}
+.preview { margin-top: 10px; }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="card">
+    <h1>📦 HÀNG HOÀN</h1>
+
+    <label>Mã đơn / mã kiện</label>
+    <input id="orderCode" placeholder="DH123456" autocomplete="off">
+
+    <label>Người xử lý</label>
+    <input id="user" placeholder="Tên nhân viên" autocomplete="off">
+
+    <label>Kết quả</label>
+    <div class="result">
+      <button id="correct" class="correct" onclick="selectResult('Đúng')">✅ Đúng</button>
+      <button id="wrong" class="wrong" onclick="selectResult('Sai')">❌ Sai</button>
+    </div>
+
+    <button id="openCamera" onclick="openCamera()">📷 MỞ CAMERA</button>
+
+    <video id="camera" autoplay playsinline muted></video>
+
+    <div class="preview" id="previewBox" style="display:none;">
+      <video id="preview" controls playsinline></video>
+    </div>
+
+    <button id="start" onclick="startRecording()" disabled>🔴 BẮT ĐẦU QUAY</button>
+    <button id="stop" onclick="stopRecording()" disabled>⏹ DỪNG QUAY</button>
+    <button id="upload" onclick="uploadVideo()" disabled>☁️ HOÀN TẤT & UPLOAD</button>
+    <button id="reset" onclick="resetAll()" style="background:#64748b;">🔄 LÀM MỚI</button>
+
+    <div id="status">Chưa bắt đầu</div>
+  </div>
+</div>
+
+<script>
+/*
+ * Thay bằng URL Apps Script của bạn sau khi deploy
+ */
+const API_URL = 'https://script.google.com/macros/s/AKfycbzMpGpe7s0Fy9W6Pn9ez1NQvFH2uECWKuT2wf0sOsa7LhSXYz-UPya5k-BlzPiDhDUM/exec';
+
+let stream = null;
+let recorder = null;
+let chunks = [];
+let videoBlob = null;
+let result = null;
+
+function selectResult(value) {
+  result = value;
+  document.getElementById('correct').classList.remove('selected');
+  document.getElementById('wrong').classList.remove('selected');
+  if (value === 'Đúng') {
+    document.getElementById('correct').classList.add('selected');
+  } else {
+    document.getElementById('wrong').classList.add('selected');
+  }
+  setStatus('Đã chọn: ' + value);
+}
+
+async function openCamera() {
+  try {
+    setStatus('⏳ Đang mở camera...');
+    // Ưu tiên camera sau (environment)
+    stream = await navigator.mediaDevices.getUserMedia({
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1280 },
+        height: { ideal: 720 }
+      },
+      audio: false
+    });
+    const camera = document.getElementById('camera');
+    camera.srcObject = stream;
+    camera.style.display = 'block';
+    document.getElementById('previewBox').style.display = 'none';
+    document.getElementById('start').disabled = false;
+    setStatus('✅ Camera đã mở – sẵn sàng quay');
+  } catch (error) {
+    setStatus('❌ Không mở được camera\n' + error.name + ': ' + error.message);
+  }
+}
+
+function startRecording() {
+  if (!stream) {
+    alert('Chưa mở camera');
+    return;
+  }
+  chunks = [];
+  let options = {};
+  if (MediaRecorder.isTypeSupported('video/webm;codecs=vp8')) {
+    options.mimeType = 'video/webm;codecs=vp8';
+  } else if (MediaRecorder.isTypeSupported('video/webm')) {
+    options.mimeType = 'video/webm';
+  }
+
+  recorder = new MediaRecorder(stream, options);
+
+  recorder.ondataavailable = function(e) {
+    if (e.data.size > 0) chunks.push(e.data);
+  };
+
+  recorder.onstop = function() {
+    videoBlob = new Blob(chunks, { type: recorder.mimeType || 'video/webm' });
+    // Hiện preview
+    const preview = document.getElementById('preview');
+    preview.src = URL.createObjectURL(videoBlob);
+    document.getElementById('previewBox').style.display = 'block';
+    document.getElementById('camera').style.display = 'none';
+    document.getElementById('upload').disabled = false;
+    setStatus('✅ Đã quay xong – kiểm tra video rồi bấm Upload');
+  };
+
+  recorder.start(1000); // timeslice để an toàn hơn trên mobile
+  document.getElementById('start').disabled = true;
+  document.getElementById('stop').disabled = false;
+  setStatus('🔴 ĐANG QUAY...');
+}
+
+function stopRecording() {
+  if (!recorder || recorder.state === 'inactive') return;
+  recorder.stop();
+  document.getElementById('stop').disabled = true;
+}
+
+async function uploadVideo() {
+  const orderCode = document.getElementById('orderCode').value.trim();
+  const user = document.getElementById('user').value.trim();
+
+  if (!orderCode) { alert('Vui lòng nhập mã đơn'); return; }
+  if (!user) { alert('Vui lòng nhập người xử lý'); return; }
+  if (!result) { alert('Vui lòng chọn Đúng hoặc Sai'); return; }
+  if (!videoBlob) { alert('Chưa có video'); return; }
+
+  setStatus('⏳ Đang chuyển đổi & upload...\nCó thể mất vài chục giây tùy độ dài video');
+
+  const base64 = await blobToBase64(videoBlob);
+  const now = new Date();
+  const day = String(now.getDate()).padStart(2, '0');
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const year = now.getFullYear();
+  const fileName = `${day}-${month}-${year}_${orderCode}_${result}_${user}.webm`;
+
+  try {
+    const response = await fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+      body: JSON.stringify({
+        orderCode,
+        user,
+        result,
+        fileName,
+        mimeType: videoBlob.type || 'video/webm',
+        base64
+      })
+    });
+
+    const data = await response.json();
+
+    if (!data.success) throw new Error(data.error || 'Lỗi không xác định');
+
+    setStatus(
+      '✅ HOÀN TẤT\n\n' +
+      'File: ' + data.fileName + '\n' +
+      (data.fileUrl ? 'Link: ' + data.fileUrl : '')
+    );
+
+    // Reset sau khi thành công
+    videoBlob = null;
+    document.getElementById('upload').disabled = true;
+  } catch (error) {
+    setStatus('❌ Upload thất bại\n' + error.message);
+  }
+}
+
+function blobToBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = reject;
+    reader.readAsDataURL(blob);
+  });
+}
+
+function setStatus(text) {
+  document.getElementById('status').innerText = text;
+}
+
+function resetAll() {
+  // Dừng camera nếu đang mở
+  if (stream) {
+    stream.getTracks().forEach(t => t.stop());
+    stream = null;
+  }
+  document.getElementById('camera').srcObject = null;
+  document.getElementById('camera').style.display = 'block';
+  document.getElementById('previewBox').style.display = 'none';
+  document.getElementById('preview').src = '';
+  videoBlob = null;
+  result = null;
+  document.getElementById('correct').classList.remove('selected');
+  document.getElementById('wrong').classList.remove('selected');
+  document.getElementById('start').disabled = true;
+  document.getElementById('stop').disabled = true;
+  document.getElementById('upload').disabled = true;
+  setStatus('Đã làm mới – sẵn sàng cho đơn tiếp theo');
+}
+</script>
+</body>
+</html>
