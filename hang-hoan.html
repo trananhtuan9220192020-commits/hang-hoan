@@ -7,6 +7,31 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<!-- ==========================================
+     FAST BARCODE / QR ENGINE
+     ZBAR WASM + BARCODE DETECTOR POLYFILL
+========================================== -->
+
+<script src="https://cdn.jsdelivr.net/npm/@undecaf/zbar-wasm@0.9.15/dist/index.js"></script>
+
+<script src="https://cdn.jsdelivr.net/npm/@undecaf/barcode-detector-polyfill@0.9.23/dist/index.js"></script>
+
+<script>
+
+  try {
+
+    window['BarcodeDetector']
+      .getSupportedFormats();
+
+  } catch (error) {
+
+    window['BarcodeDetector'] =
+      barcodeDetectorPolyfill
+        .BarcodeDetectorPolyfill;
+
+  }
+
+</script>
 <script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 <style>
@@ -1981,6 +2006,143 @@ video {
     0 0 10px
     rgba(34, 197, 94, .9);
 }
+/* ==========================================
+   FAST QR + BARCODE SCANNER
+========================================== */
+
+
+/* CAMERA MỚI */
+
+#fastScannerVideo {
+
+  display: none;
+
+  width: 100%;
+
+  height: 360px;
+
+  margin: 0 !important;
+
+  object-fit: cover;
+
+  background: #000;
+
+  border: 0;
+
+  border-radius: 18px;
+
+  box-shadow: none;
+
+  transform-origin: center center;
+
+  transition:
+    transform .25s ease;
+
+}
+
+
+/* ==========================================
+   HTML5-QRCODE CHỈ LÀ DỰ PHÒNG
+========================================== */
+
+#reader {
+
+  display: none;
+
+}
+
+
+/* ==========================================
+   BỎ LỚP TỐI TOÀN MÀN HÌNH CŨ
+   VÌ KHUNG MỚI TỰ TẠO VÙNG TỐI
+========================================== */
+
+#scannerBox
+.scan-overlay::before {
+
+  background: transparent;
+
+}
+
+
+/* ==========================================
+   MỘT KHUNG DUY NHẤT
+   DÙNG CHO CẢ QR + BARCODE
+========================================== */
+
+.scan-frame.fast {
+
+  position: absolute;
+
+  left: 50%;
+
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+  width: 84%;
+
+  max-width: 350px;
+
+  height: 210px;
+
+  border:
+    3px solid #22c55e;
+
+  border-radius: 18px;
+
+  background:
+    transparent;
+
+  box-shadow:
+    0 0 0 9999px
+    rgba(0, 0, 0, .32);
+
+}
+
+
+/* ==========================================
+   KHI AUTO ZOOM
+   KHUNG ĐỔI SANG VÀNG
+========================================== */
+
+#scannerBox
+.scanner-stage.is-zooming
+.scan-frame.fast {
+
+  border-color:
+    #facc15;
+
+}
+
+
+/* ==========================================
+   MOBILE
+========================================== */
+
+@media
+(max-width: 520px) {
+
+  #fastScannerVideo {
+
+    height:
+      390px;
+
+  }
+
+
+  .scan-frame.fast {
+
+    width:
+      86%;
+
+    height:
+      210px;
+
+  }
+
+}
 </style>
 
 
@@ -2087,17 +2249,60 @@ video {
     📦 Quét mã
   </div>
 
-  <div class="scanner-stage">
-    <div id="reader"></div>
+<div class="scanner-stage">
 
-    <div class="scan-overlay">
-      <div id="scanFrame" class="scan-frame qr"></div>
-      <div class="scan-tip" id="scanTip">
-        Đưa mã vào giữa khung
-      </div>
+  <!-- =====================================
+       CAMERA NHANH
+  ====================================== -->
+
+  <video
+    id="fastScannerVideo"
+    autoplay
+    muted
+    playsinline
+  ></video>
+
+
+  <!-- =====================================
+       HTML5-QRCODE DỰ PHÒNG
+  ====================================== -->
+
+  <div id="reader"></div>
+
+
+  <!-- =====================================
+       CANVAS ẨN
+       DÙNG ĐỂ LẤY FRAME CAMERA
+  ====================================== -->
+
+  <canvas
+    id="fastScannerCanvas"
+    style="display:none;"
+  ></canvas>
+
+
+  <!-- =====================================
+       KHUNG HƯỚNG DẪN
+  ====================================== -->
+
+  <div class="scan-overlay">
+
+    <div
+      id="scanFrame"
+      class="scan-frame fast"
+    ></div>
+
+
+    <div
+      class="scan-tip"
+      id="scanTip"
+    >
+      Đưa QR hoặc barcode vào giữa khung
     </div>
+
   </div>
 
+</div>
   <div class="scanner-help" id="scannerHelp">
     Đưa QR hoặc barcode vào đúng vùng quét
   </div>
@@ -3015,6 +3220,38 @@ let scannerRunning = false;
 let lastScannedCode = '';
 let lastScanTime = 0;
 let duplicateApprovedCode = '';
+// ==========================================
+// FAST QR + BARCODE SCANNER
+// ==========================================
+
+let fastScannerStream =
+  null;
+
+let fastScannerDetector =
+  null;
+
+let fastScannerTimer =
+  null;
+
+let fastScannerBusy =
+  false;
+
+let fastScannerStartTime =
+  0;
+
+let fastScannerZoomLevel =
+  1;
+
+
+// Camera có cho điều khiển zoom thật không
+let fastScannerCanPhysicalZoom =
+  false;
+
+
+// Hiện tại có đang dùng zoom camera thật không
+let fastScannerUsingPhysicalZoom =
+  false;
+
 // ===== ÂM THANH BÍP =====
 let audioContext = null;
 
@@ -3075,162 +3312,1349 @@ function beep() {
   }
 }
 
-/* ===== MỞ CAMERA QUÉT ===== */
+/* ==========================================
+   MỞ FAST SCANNER
+========================================== */
+
 async function startScanner() {
-prepareBeep();
 
-  if (scannerRunning) return;
+  prepareBeep();
 
-  // Nếu camera quay video đang mở thì tắt nó
+
+  // Không mở lần hai
+  if (scannerRunning) {
+
+    return;
+
+  }
+
+
+  // ========================================
+  // NẾU CAMERA QUAY VIDEO ĐANG MỞ
+  // → TẮT TRƯỚC
+  // ========================================
+
   if (stream) {
-    stream.getTracks().forEach(track => track.stop());
-    stream = null;
 
-    document.getElementById('camera').srcObject = null;
-    document.getElementById('start').disabled = true;
-  }
-
-  const scannerBox = document.getElementById('scannerBox');
-
-  scannerBox.style.display = 'block';
-
-  setStatus('📷 Đang mở camera quét mã...');
-
-  try {
-
-  html5QrCode = new Html5Qrcode(
-  "reader",
-  {
-    formatsToSupport: [
-      Html5QrcodeSupportedFormats.QR_CODE,
-      Html5QrcodeSupportedFormats.CODE_128
-    ],
-
-    useBarCodeDetectorIfSupported: true
-  }
-);
-
-    scannerRunning = true;
-
-  await html5QrCode.start(
-
-  {
-    facingMode: "environment"
-  },
-
-{
-  fps: 20,
-
-  disableFlip: true,
-
-  // CHỈ QUÉT TRONG KHUNG Ở GIỮA
-  qrbox: function(
-    viewfinderWidth,
-    viewfinderHeight
-  ) {
-
-    const width =
-      Math.min(
-        Math.floor(
-          viewfinderWidth * 0.82
-        ),
-        340
+    stream
+      .getTracks()
+      .forEach(
+        track =>
+          track.stop()
       );
 
-    const height =
-      Math.min(
-        Math.floor(
-          viewfinderHeight * 0.38
-        ),
-        170
+
+    stream =
+      null;
+
+
+    const camera =
+      document.getElementById(
+        'camera'
       );
 
-    return {
-      width: width,
-      height: height
-    };
-  },
 
-  videoConstraints: {
+    if (camera) {
 
-    facingMode: {
-      ideal: "environment"
-    },
+      camera.srcObject =
+        null;
 
-    width: {
-      ideal: 1920
-    },
+    }
 
-    height: {
-      ideal: 1080
-    },
 
-    frameRate: {
-      ideal: 30,
-      max: 30
+    const startButton =
+      document.getElementById(
+        'start'
+      );
+
+
+    if (startButton) {
+
+      startButton.disabled =
+        true;
+
     }
 
   }
 
-},
 
-  onScanSuccess,
+  // ========================================
+  // HIỆN KHUNG SCANNER
+  // ========================================
 
-  onScanFailure
-);
+  const scannerBox =
+    document.getElementById(
+      'scannerBox'
+    );
 
-// ===== CỐ GẮNG BẬT AUTOFOCUS =====
-try {
 
-  const capabilities =
-    html5QrCode.getRunningTrackCapabilities();
+  scannerBox.style.display =
+    'block';
 
-  if (
-    capabilities.focusMode &&
-    capabilities.focusMode.includes("continuous")
-  ) {
 
-    await html5QrCode.applyVideoConstraints({
+  scannerRunning =
+    true;
 
-      advanced: [
-        {
-          focusMode: "continuous"
-        }
-      ]
 
-    });
+  fastScannerBusy =
+    false;
 
-  }
 
-} catch (error) {
+  fastScannerStartTime =
+    Date.now();
 
-  console.log(
-    "Thiết bị không hỗ trợ chỉnh autofocus:",
-    error
+
+  fastScannerZoomLevel =
+    1;
+
+
+  fastScannerCanPhysicalZoom =
+    false;
+
+
+  fastScannerUsingPhysicalZoom =
+    false;
+
+
+  setStatus(
+    '⚡ Đang khởi động máy quét nhanh...'
   );
 
-}
+
+  try {
+
+    // ======================================
+    // CÁC LOẠI MÃ MUỐN ĐỌC
+    // ======================================
+
+    const wantedFormats = [
+
+      'qr_code',
+
+      'code_128',
+
+      'ean_13',
+
+      'ean_8',
+
+      'code_39',
+
+      'upc_a',
+
+      'upc_e'
+
+    ];
+
+
+    // ======================================
+    // HỎI ENGINE XEM HỖ TRỢ LOẠI NÀO
+    // ======================================
+
+    const supportedFormats =
+      await BarcodeDetector
+        .getSupportedFormats();
+
+
+    const formats =
+      wantedFormats.filter(
+        format =>
+          supportedFormats.includes(
+            format
+          )
+      );
+
+
+    if (
+      formats.length === 0
+    ) {
+
+      throw new Error(
+        'Không có định dạng QR/barcode phù hợp'
+      );
+
+    }
+
+
+    console.log(
+      'Scanner formats:',
+      formats
+    );
+
+
+    // ======================================
+    // TẠO DETECTOR
+    // ======================================
+
+    fastScannerDetector =
+      new BarcodeDetector({
+
+        formats:
+          formats
+
+      });
+
+
+    // ======================================
+    // MỞ CAMERA SAU
+    // 1080P ĐỂ GIỮ CHI TIẾT TEM NHỎ
+    // ======================================
+
+    fastScannerStream =
+      await navigator
+        .mediaDevices
+        .getUserMedia({
+
+          video: {
+
+            facingMode: {
+
+              ideal:
+                'environment'
+
+            },
+
+
+            width: {
+
+              ideal:
+                1920
+
+            },
+
+
+            height: {
+
+              ideal:
+                1080
+
+            },
+
+
+            frameRate: {
+
+              ideal:
+                30,
+
+              max:
+                30
+
+            }
+
+          },
+
+
+          audio:
+            false
+
+        });
+
+
+    // ======================================
+    // GẮN STREAM VÀO VIDEO
+    // ======================================
+
+    const video =
+      document.getElementById(
+        'fastScannerVideo'
+      );
+
+
+    const reader =
+      document.getElementById(
+        'reader'
+      );
+
+
+    if (reader) {
+
+      reader.style.display =
+        'none';
+
+    }
+
+
+    video.style.display =
+      'block';
+
+
+    video.srcObject =
+      fastScannerStream;
+
+
+    await video.play();
+
+
+    // ======================================
+    // BẬT AUTOFOCUS
+    // KIỂM TRA CAMERA ZOOM
+    // ======================================
+
+    await setupFastScannerCamera();
+
+
+    // ======================================
+    // THÔNG BÁO
+    // ======================================
 
     setStatus(
-      '📷 Camera quét đã mở\n' +
-      'Đưa barcode hoặc QR vào giữa khung'
+      '⚡ MÁY QUÉT ĐÃ SẴN SÀNG\n\n' +
+      '✅ QR + barcode\n' +
+      '🔍 Tự động zoom nếu chưa nhận mã'
     );
+
+
+    // ======================================
+    // BẮT ĐẦU NHẬN DẠNG
+    // ======================================
+
+    scanFastFrame();
+
 
   } catch (error) {
 
-    console.error(error);
-
-    scannerRunning = false;
-
-    scannerBox.style.display = 'none';
-
-    setStatus(
-      '❌ Không mở được camera quét mã\n' +
+    console.error(
+      'Fast Scanner Error:',
       error
     );
+
+
+    setStatus(
+      '⚠️ Máy quét nhanh không dùng được\n' +
+      'Đang chuyển sang scanner dự phòng...'
+    );
+
+
+    // Dọn camera mới
+    await stopFastScannerOnly();
+
+
+    // Chạy html5-qrcode cũ
+    await startOldScannerFallback();
+
   }
+
 }
 
+// ==========================================
+// CHUẨN BỊ CAMERA
+// AUTOFOCUS + KIỂM TRA ZOOM
+// ==========================================
+
+async function setupFastScannerCamera() {
+
+  if (!fastScannerStream) {
+
+    return;
+
+  }
+
+
+  const track =
+    fastScannerStream
+      .getVideoTracks()[0];
+
+
+  if (!track) {
+
+    return;
+
+  }
+
+
+  try {
+
+    const capabilities =
+      track.getCapabilities
+        ? track.getCapabilities()
+        : {};
+
+
+    console.log(
+      'Camera capabilities:',
+      capabilities
+    );
+
+
+    // ======================================
+    // CONTINUOUS AUTOFOCUS
+    // ======================================
+
+    if (
+      capabilities.focusMode &&
+      capabilities.focusMode.includes(
+        'continuous'
+      )
+    ) {
+
+      try {
+
+        await track
+          .applyConstraints({
+
+            advanced: [
+
+              {
+
+                focusMode:
+                  'continuous'
+
+              }
+
+            ]
+
+          });
+
+      } catch (focusError) {
+
+        console.log(
+          'Không bật continuous focus:',
+          focusError
+        );
+
+      }
+
+    }
+
+
+    // ======================================
+    // KIỂM TRA CAMERA CÓ ZOOM THẬT KHÔNG
+    // ======================================
+
+    if (
+      capabilities.zoom &&
+      Number.isFinite(
+        capabilities.zoom.min
+      ) &&
+      Number.isFinite(
+        capabilities.zoom.max
+      ) &&
+      capabilities.zoom.max >
+        capabilities.zoom.min
+    ) {
+
+      fastScannerCanPhysicalZoom =
+        true;
+
+    }
+
+
+  } catch (error) {
+
+    console.log(
+      'Không đọc được camera capabilities:',
+      error
+    );
+
+  }
+
+}
+
+// ==========================================
+// ĐỔI MỨC ZOOM
+// ==========================================
+
+async function setFastScannerZoom(
+  level
+) {
+
+  fastScannerZoomLevel =
+    level;
+
+
+  const video =
+    document.getElementById(
+      'fastScannerVideo'
+    );
+
+
+  const stage =
+    document.querySelector(
+      '#scannerBox .scanner-stage'
+    );
+
+
+  // ======================================
+  // ĐỔI MÀU KHUNG
+  // ======================================
+
+  if (stage) {
+
+    if (level > 1.05) {
+
+      stage.classList.add(
+        'is-zooming'
+      );
+
+    } else {
+
+      stage.classList.remove(
+        'is-zooming'
+      );
+
+    }
+
+  }
+
+
+  // Mặc định chưa dùng zoom vật lý
+  fastScannerUsingPhysicalZoom =
+    false;
+
+
+  // ======================================
+  // THỬ ZOOM CAMERA THẬT
+  // ======================================
+
+  if (
+    fastScannerCanPhysicalZoom &&
+    fastScannerStream
+  ) {
+
+    try {
+
+      const track =
+        fastScannerStream
+          .getVideoTracks()[0];
+
+
+      const caps =
+        track.getCapabilities();
+
+
+      const requestedZoom =
+        Math.min(
+
+          caps.zoom.max,
+
+          Math.max(
+
+            caps.zoom.min,
+
+            level
+
+          )
+
+        );
+
+
+      await track
+        .applyConstraints({
+
+          advanced: [
+
+            {
+
+              zoom:
+                requestedZoom
+
+            }
+
+          ]
+
+        });
+
+
+      fastScannerUsingPhysicalZoom =
+        true;
+
+
+      // Không scale CSS nếu camera
+      // đã zoom thật
+      if (video) {
+
+        video.style.transform =
+          'scale(1)';
+
+      }
+
+
+      return;
+
+
+    } catch (error) {
+
+      console.log(
+        'Camera không cho zoom thật:',
+        error
+      );
+
+
+      fastScannerUsingPhysicalZoom =
+        false;
+
+    }
+
+  }
+
+
+  // ======================================
+  // NẾU IPHONE KHÔNG CHO ĐIỀU KHIỂN ZOOM
+  // → ZOOM HÌNH HIỂN THỊ
+  // → DETECTOR CŨNG CROP Ở BƯỚC SAU
+  // ======================================
+
+  if (video) {
+
+    const visualZoom =
+      Math.min(
+        level,
+        1.8
+      );
+
+
+    video.style.transform =
+      'scale(' +
+      visualZoom +
+      ')';
+
+  }
+
+}
+
+// ==========================================
+// AUTO ZOOM
+// ==========================================
+
+async function updateFastAutoZoom() {
+
+  const elapsed =
+    Date.now() -
+    fastScannerStartTime;
+
+
+  let wantedZoom =
+    1;
+
+
+  // 0 → 0.65 giây
+  // giữ nguyên
+  if (
+    elapsed >= 650
+  ) {
+
+    wantedZoom =
+      1.25;
+
+  }
+
+
+  // Sau 1.3 giây
+  if (
+    elapsed >= 1300
+  ) {
+
+    wantedZoom =
+      1.5;
+
+  }
+
+
+  // Sau 2.2 giây
+  if (
+    elapsed >= 2200
+  ) {
+
+    wantedZoom =
+      1.6;
+
+  }
+
+
+  // Sau 3.2 giây
+  if (
+    elapsed >= 3200
+  ) {
+
+    wantedZoom =
+      1.8;
+
+  }
+
+
+  // Chỉ đổi khi mức zoom thực sự khác
+  if (
+    Math.abs(
+      wantedZoom -
+      fastScannerZoomLevel
+    ) >= 0.05
+  ) {
+
+    await setFastScannerZoom(
+      wantedZoom
+    );
+
+  }
+
+}
+
+// ==========================================
+// QUÉT TỪNG FRAME
+// ==========================================
+
+async function scanFastFrame() {
+
+  // Scanner đã đóng
+  if (
+    !scannerRunning ||
+    !fastScannerDetector
+  ) {
+
+    return;
+
+  }
+
+
+  // Không cho 2 lần detect
+  // chạy chồng nhau
+  if (fastScannerBusy) {
+
+    fastScannerTimer =
+      setTimeout(
+        scanFastFrame,
+        60
+      );
+
+
+    return;
+
+  }
+
+
+  const video =
+    document.getElementById(
+      'fastScannerVideo'
+    );
+
+
+  const canvas =
+    document.getElementById(
+      'fastScannerCanvas'
+    );
+
+
+  // Camera chưa sẵn sàng
+  if (
+    !video ||
+    !canvas ||
+    video.readyState < 2 ||
+    !video.videoWidth ||
+    !video.videoHeight
+  ) {
+
+    fastScannerTimer =
+      setTimeout(
+        scanFastFrame,
+        70
+      );
+
+
+    return;
+
+  }
+
+
+  fastScannerBusy =
+    true;
+
+
+  try {
+
+    // ======================================
+    // CẬP NHẬT AUTO ZOOM
+    // ======================================
+
+    await updateFastAutoZoom();
+
+
+    const videoWidth =
+      video.videoWidth;
+
+
+    const videoHeight =
+      video.videoHeight;
+
+
+    // ======================================
+    // NẾU CAMERA ĐÃ ZOOM THẬT
+    // → KHÔNG CROP THÊM
+    //
+    // NẾU KHÔNG CÓ ZOOM THẬT
+    // → CROP VÙNG GIỮA ĐỂ GIẢ LẬP ZOOM
+    // ======================================
+
+    const digitalZoom =
+      fastScannerUsingPhysicalZoom
+        ? 1
+        : Math.max(
+            1,
+            fastScannerZoomLevel
+          );
+
+
+    // ======================================
+    // CHIỀU RỘNG VÙNG QUÉT
+    // ======================================
+
+    const cropWidth =
+      Math.min(
+
+        videoWidth,
+
+        Math.floor(
+
+          videoWidth *
+          0.94 /
+          digitalZoom
+
+        )
+
+      );
+
+
+    // ======================================
+    // CHIỀU CAO
+    //
+    // Không làm quá thấp
+    // vì còn phải đọc QR vuông
+    // ======================================
+
+    const cropHeight =
+      Math.min(
+
+        videoHeight,
+
+        Math.min(
+
+          Math.floor(
+            cropWidth *
+            0.78
+          ),
+
+          Math.floor(
+            videoHeight *
+            0.86
+          )
+
+        )
+
+      );
+
+
+    // ======================================
+    // CROP Ở CHÍNH GIỮA
+    // ======================================
+
+    const cropX =
+      Math.max(
+
+        0,
+
+        Math.floor(
+          (
+            videoWidth -
+            cropWidth
+          ) / 2
+        )
+
+      );
+
+
+    const cropY =
+      Math.max(
+
+        0,
+
+        Math.floor(
+          (
+            videoHeight -
+            cropHeight
+          ) / 2
+        )
+
+      );
+
+
+    // ======================================
+    // GIỮ ĐỘ PHÂN GIẢI CAO
+    // TEM NHỎ CẦN NHIỀU PIXEL
+    // ======================================
+
+    const targetWidth =
+      Math.min(
+        1600,
+        cropWidth
+      );
+
+
+    const targetHeight =
+      Math.max(
+
+        1,
+
+        Math.floor(
+
+          targetWidth *
+          cropHeight /
+          cropWidth
+
+        )
+
+      );
+
+
+    canvas.width =
+      targetWidth;
+
+
+    canvas.height =
+      targetHeight;
+
+
+    const ctx =
+      canvas.getContext(
+
+        '2d',
+
+        {
+
+          alpha:
+            false
+
+        }
+
+      );
+
+
+    // Không làm mờ vạch barcode
+    ctx.imageSmoothingEnabled =
+      false;
+
+
+    // ======================================
+    // VẼ FRAME CAMERA VÀO CANVAS
+    // ======================================
+
+    ctx.drawImage(
+
+      video,
+
+      // Vùng nguồn
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+
+      // Vùng đích
+      0,
+      0,
+      targetWidth,
+      targetHeight
+
+    );
+
+
+    // ======================================
+    // DETECT
+    // ======================================
+
+    const detected =
+      await fastScannerDetector
+        .detect(
+          canvas
+        );
+
+
+    if (
+      detected &&
+      detected.length > 0
+    ) {
+
+      // ====================================
+      // NẾU CAMERA THẤY CẢ QR + BARCODE
+      // → ƯU TIÊN QR
+      // ====================================
+
+      const bestResult =
+
+        detected.find(
+          item =>
+            item.format ===
+            'qr_code'
+        )
+
+        ||
+
+        detected[0];
+
+
+      const code =
+        String(
+          bestResult.rawValue ||
+          ''
+        ).trim();
+
+
+      if (code) {
+
+        console.log(
+          '✅ FAST SCAN:',
+          bestResult.format,
+          code
+        );
+
+
+        fastScannerBusy =
+          false;
+
+
+        // ==================================
+        // GỌI LẠI XỬ LÝ CŨ CỦA BẠN
+        //
+        // beep
+        // rung
+        // điền mã
+        // đóng camera
+        // kiểm tra trùng
+        // ==================================
+
+        await onScanSuccess(
+          code,
+          bestResult
+        );
+
+
+        return;
+
+      }
+
+    }
+
+
+  } catch (error) {
+
+    console.log(
+      'Fast detect:',
+      error
+    );
+
+  }
+
+
+  fastScannerBusy =
+    false;
+
+
+  // ======================================
+  // CHƯA THẤY MÃ → QUÉT FRAME TIẾP
+  // ======================================
+
+  if (scannerRunning) {
+
+    fastScannerTimer =
+      setTimeout(
+        scanFastFrame,
+        65
+      );
+
+  }
+
+}
+// ==========================================
+// DỪNG FAST SCANNER
+// ==========================================
+
+async function stopFastScannerOnly() {
+
+  fastScannerBusy =
+    false;
+
+
+  // ======================================
+  // DỪNG LOOP
+  // ======================================
+
+  if (fastScannerTimer) {
+
+    clearTimeout(
+      fastScannerTimer
+    );
+
+
+    fastScannerTimer =
+      null;
+
+  }
+
+
+  // ======================================
+  // DỪNG CAMERA
+  // ======================================
+
+  if (fastScannerStream) {
+
+    fastScannerStream
+      .getTracks()
+      .forEach(
+        track =>
+          track.stop()
+      );
+
+
+    fastScannerStream =
+      null;
+
+  }
+
+
+  // ======================================
+  // RESET VIDEO
+  // ======================================
+
+  const video =
+    document.getElementById(
+      'fastScannerVideo'
+    );
+
+
+  if (video) {
+
+    try {
+
+      video.pause();
+
+    } catch (error) {}
+
+
+    video.srcObject =
+      null;
+
+
+    video.style.display =
+      'none';
+
+
+    video.style.transform =
+      'scale(1)';
+
+  }
+
+
+  // ======================================
+  // RESET KHUNG
+  // ======================================
+
+  const stage =
+    document.querySelector(
+      '#scannerBox .scanner-stage'
+    );
+
+
+  if (stage) {
+
+    stage.classList.remove(
+      'is-zooming'
+    );
+
+  }
+
+
+  // ======================================
+  // RESET BIẾN
+  // ======================================
+
+  fastScannerDetector =
+    null;
+
+
+  fastScannerCanPhysicalZoom =
+    false;
+
+
+  fastScannerUsingPhysicalZoom =
+    false;
+
+
+  fastScannerZoomLevel =
+    1;
+
+}
+
+// ==========================================
+// HTML5-QRCODE FALLBACK
+// ==========================================
+
+async function startOldScannerFallback() {
+
+  const reader =
+    document.getElementById(
+      'reader'
+    );
+
+
+  if (reader) {
+
+    reader.style.display =
+      'block';
+
+  }
+
+
+  html5QrCode =
+    new Html5Qrcode(
+
+      'reader',
+
+      {
+
+        formatsToSupport: [
+
+          Html5QrcodeSupportedFormats
+            .QR_CODE,
+
+          Html5QrcodeSupportedFormats
+            .CODE_128,
+
+          Html5QrcodeSupportedFormats
+            .EAN_13,
+
+          Html5QrcodeSupportedFormats
+            .EAN_8
+
+        ],
+
+
+        useBarCodeDetectorIfSupported:
+          true
+
+      }
+
+    );
+
+
+  await html5QrCode.start(
+
+    {
+
+      facingMode:
+        'environment'
+
+    },
+
+    {
+
+      fps:
+        12,
+
+
+      disableFlip:
+        true,
+
+
+      // ====================================
+      // KHUNG LỚN HƠN BẢN CŨ
+      // ĐỂ QR KHÔNG BỊ ÉP VÀO KHUNG NGANG
+      // ====================================
+
+      qrbox:
+        function(
+          viewfinderWidth,
+          viewfinderHeight
+        ) {
+
+          const width =
+            Math.min(
+
+              Math.floor(
+                viewfinderWidth *
+                0.84
+              ),
+
+              350
+
+            );
+
+
+          const height =
+            Math.min(
+
+              Math.floor(
+                viewfinderHeight *
+                0.62
+              ),
+
+              230
+
+            );
+
+
+          return {
+
+            width:
+              width,
+
+            height:
+              height
+
+          };
+
+        },
+
+
+      videoConstraints: {
+
+        facingMode: {
+
+          ideal:
+            'environment'
+
+        },
+
+
+        width: {
+
+          ideal:
+            1920
+
+        },
+
+
+        height: {
+
+          ideal:
+            1080
+
+        },
+
+
+        frameRate: {
+
+          ideal:
+            30,
+
+          max:
+            30
+
+        }
+
+      }
+
+    },
+
+
+    onScanSuccess,
+
+
+    function() {}
+
+  );
+
+
+  setStatus(
+    '📷 Đang dùng scanner dự phòng\n\n' +
+    'QR + barcode'
+  );
+
+}
 
 /* ===== KHI QUÉT THÀNH CÔNG ===== */
 async function onScanSuccess(decodedText, decodedResult) {
@@ -3414,42 +4838,102 @@ function onScanFailure(error) {
 }
 
 
-/* ===== ĐÓNG CAMERA QUÉT ===== */
+/* ==========================================
+   ĐÓNG CAMERA QUÉT
+========================================== */
+
 async function stopScanner() {
 
-  if (!html5QrCode) {
+  // Quan trọng:
+  // đánh dấu dừng ngay từ đầu
+  scannerRunning =
+    false;
 
-    scannerRunning = false;
 
-    document.getElementById(
-      'scannerBox'
-    ).style.display = 'none';
+  // ======================================
+  // 1. DỪNG FAST SCANNER
+  // ======================================
 
-    return;
-  }
+  await stopFastScannerOnly();
 
-  try {
 
-    if (scannerRunning) {
-      await html5QrCode.stop();
+  // ======================================
+  // 2. DỪNG HTML5-QRCODE NẾU FALLBACK
+  // ======================================
+
+  if (html5QrCode) {
+
+    try {
+
+      await html5QrCode
+        .stop();
+
+    } catch (error) {
+
+      console.log(
+        'Stop fallback:',
+        error
+      );
+
     }
 
-  } catch (error) {
-    console.log(error);
+
+    try {
+
+      html5QrCode
+        .clear();
+
+    } catch (error) {
+
+      console.log(
+        'Clear fallback:',
+        error
+      );
+
+    }
+
+
+    html5QrCode =
+      null;
+
   }
 
-  try {
-    html5QrCode.clear();
-  } catch (error) {
-    console.log(error);
+
+  // ======================================
+  // 3. ẨN READER CŨ
+  // ======================================
+
+  const reader =
+    document.getElementById(
+      'reader'
+    );
+
+
+  if (reader) {
+
+    reader.style.display =
+      'none';
+
   }
 
-  html5QrCode = null;
-  scannerRunning = false;
 
-  document.getElementById(
-    'scannerBox'
-  ).style.display = 'none';
+  // ======================================
+  // 4. ẨN SCANNER BOX
+  // ======================================
+
+  const scannerBox =
+    document.getElementById(
+      'scannerBox'
+    );
+
+
+  if (scannerBox) {
+
+    scannerBox.style.display =
+      'none';
+
+  }
+
 }
 function updateClearOrderButton() {
 
@@ -9229,6 +10713,8 @@ async function startInventoryScanner() {
     );
 
   }
+
+
 
   // Bước sau chúng ta sẽ tạo function này
   scanInventoryNativeFrame();
