@@ -1878,6 +1878,109 @@ video {
   width: 100% !important;
   object-fit: cover;
 }
+/* ==========================================
+   NATIVE BARCODE SCANNER
+========================================== */
+
+.inventory-camera-stage {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #000;
+}
+
+
+/* CAMERA NATIVE */
+
+#inventoryNativeVideo {
+  display: none;
+
+  width: 100%;
+  aspect-ratio: 4 / 3;
+
+  object-fit: cover;
+
+  margin: 0;
+
+  background: #000;
+
+  border-radius: 14px;
+
+  box-shadow: none;
+
+  border: 0;
+}
+
+
+/* HTML5 SCANNER DỰ PHÒNG */
+
+#inventoryReader {
+  display: none;
+}
+
+
+/* LỚP KHUNG QUÉT */
+
+.inventory-native-overlay {
+  pointer-events: none;
+
+  position: absolute;
+
+  inset: 0;
+
+  z-index: 20;
+}
+
+
+/* KHUNG BARCODE NGANG */
+
+.inventory-native-frame {
+  position: absolute;
+
+  left: 50%;
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+  width: 88%;
+
+  max-width: 360px;
+
+  height: 115px;
+
+  border: 3px solid #22c55e;
+
+  border-radius: 14px;
+
+  box-shadow:
+    0 0 0 9999px
+    rgba(0, 0, 0, .40);
+}
+
+
+/* ĐƯỜNG QUÉT GIỮA KHUNG */
+
+.inventory-native-line {
+  position: absolute;
+
+  left: 6%;
+  right: 6%;
+
+  top: 50%;
+
+  height: 2px;
+
+  transform:
+    translateY(-50%);
+
+  background: #22c55e;
+
+  box-shadow:
+    0 0 10px
+    rgba(34, 197, 94, .9);
+}
 </style>
 
 
@@ -2229,17 +2332,33 @@ video {
       </button>
     </div>
 
-    <div class="inventory-reader-wrap">
+  <div class="inventory-camera-stage">
+
+  <video
+    id="inventoryNativeVideo"
+    autoplay
+    muted
+    playsinline
+  ></video>
 
   <div id="inventoryReader"></div>
 
-  <div class="inventory-scan-guide">
+  <div class="inventory-native-overlay">
 
-    <div class="inventory-scan-line"></div>
+    <div class="inventory-native-frame">
+
+      <div class="inventory-native-line"></div>
+
+    </div>
 
   </div>
 
 </div>
+
+<canvas
+  id="inventoryNativeCanvas"
+  style="display:none;"
+></canvas>
 
   </div>
 
@@ -3864,6 +3983,15 @@ let inventoryHtml5QrCode = null;
 let inventoryScannerRunning = false;
 let inventoryLastScannedBarcode = '';
 let inventoryLastBarcodeTime = 0;
+
+// ===== NATIVE BARCODE SCANNER =====
+
+let inventoryNativeStream = null;
+let inventoryNativeDetector = null;
+let inventoryNativeTimer = null;
+let inventoryNativeCanvas = null;
+let inventoryNativeBusy = false;
+let inventoryScannerMode = '';
 
 let currentDashboardAttentionRows = [];
 let currentDashboardTopRows = [];
@@ -8965,28 +9093,53 @@ async function startInventoryScanner() {
   }
 
 
-  // Đảm bảo scanner Hàng hoàn không chiếm camera
+  // ==========================================
+  // DỪNG SCANNER HÀNG HOÀN NẾU ĐANG CHẠY
+  // ==========================================
+
   if (scannerRunning) {
+
     await stopScanner();
+
   }
 
 
-  // Đảm bảo camera quay Hàng hoàn không chiếm camera
+  // ==========================================
+  // DỪNG CAMERA QUAY HÀNG HOÀN
+  // ==========================================
+
   if (stream) {
 
     stream
       .getTracks()
       .forEach(
-        track => track.stop()
+        track =>
+          track.stop()
       );
+
 
     stream = null;
 
-    document.getElementById(
-      'camera'
-    ).srcObject = null;
+
+    const returnCamera =
+      document.getElementById(
+        'camera'
+      );
+
+
+    if (returnCamera) {
+
+      returnCamera.srcObject =
+        null;
+
+    }
+
   }
 
+
+  // ==========================================
+  // HIỆN KHUNG CAMERA KIỂM KHO
+  // ==========================================
 
   const box =
     document.getElementById(
@@ -8994,157 +9147,81 @@ async function startInventoryScanner() {
     );
 
 
-  box.style.display =
-    'block';
+  if (box) {
+
+    box.style.display =
+      'block';
+
+  }
+
+
+  inventoryScannerRunning =
+    true;
 
 
   setInventoryStatus(
-    '📷 Đang mở camera quét barcode...'
+    '⚡ Đang khởi động máy quét barcode...'
   );
 
 
-  try {
+  // ==========================================
+  // ƯU TIÊN BARCODE DETECTOR NATIVE
+  // ==========================================
 
-    inventoryHtml5QrCode =
-      new Html5Qrcode(
-        'inventoryReader',
-        {
-        formatsToSupport: [
-  Html5QrcodeSupportedFormats.CODE_128,
-  Html5QrcodeSupportedFormats.EAN_13,
-  Html5QrcodeSupportedFormats.EAN_8,
-  Html5QrcodeSupportedFormats.CODE_39
-],
-          useBarCodeDetectorIfSupported:
-            true
-        }
-      );
-
-
-    inventoryScannerRunning =
-      true;
-
-
-    await inventoryHtml5QrCode.start(
-
-      {
-        facingMode:
-          'environment'
-      },
-
-     {
-  fps: 20,
-
-  disableFlip: true,
-
-  // BARCODE → KHUNG NGANG
-  qrbox: function(
-    viewfinderWidth,
-    viewfinderHeight
+  if (
+    'BarcodeDetector' in window
   ) {
 
-    const width =
-      Math.min(
-        Math.floor(
-          viewfinderWidth * 0.88
-        ),
-        360
+    try {
+
+      await startInventoryNativeScanner();
+
+      return;
+
+    } catch (error) {
+
+      console.warn(
+        'Native BarcodeDetector lỗi:',
+        error
       );
 
-    const height =
-      Math.min(
-        Math.floor(
-          viewfinderHeight * 0.28
-        ),
-        120
-      );
 
-    return {
-      width: width,
-      height: height
-    };
-  },
+      await stopInventoryNativeOnly();
 
-  videoConstraints: {
-
-    facingMode: {
-      ideal: 'environment'
-    },
-
-    width: {
-      ideal: 1920
-    },
-
-    height: {
-      ideal: 1080
-    },
-
-    frameRate: {
-      ideal: 30,
-      max: 30
     }
 
   }
 
-},
 
-      onInventoryBarcodeSuccess,
+  // ==========================================
+  // NẾU KHÔNG HỖ TRỢ
+  // → DÙNG HTML5-QRCODE DỰ PHÒNG
+  // ==========================================
 
-      function() {}
+  try {
 
-    );
-
-
-    try {
-
-      const capabilities =
-        inventoryHtml5QrCode
-          .getRunningTrackCapabilities();
-
-
-      if (
-        capabilities.focusMode &&
-        capabilities.focusMode.includes(
-          'continuous'
-        )
-      ) {
-
-        await inventoryHtml5QrCode
-          .applyVideoConstraints({
-            advanced: [
-              {
-                focusMode:
-                  'continuous'
-              }
-            ]
-          });
-
-      }
-
-    } catch (error) {
-
-      console.log(
-        'Không bật được autofocus barcode:',
-        error
-      );
-
-    }
-
-
-    setInventoryStatus(
-      '📷 Camera đã sẵn sàng\nQuét barcode trên tag sản phẩm'
-    );
-
+    await startInventoryHtml5Fallback();
 
   } catch (error) {
 
     console.error(error);
 
+
     inventoryScannerRunning =
       false;
 
-    box.style.display =
-      'none';
+
+    inventoryScannerMode =
+      '';
+
+
+    if (box) {
+
+      box.style.display =
+        'none';
+
+    }
+
 
     setInventoryStatus(
       '❌ Không mở được camera barcode\n' +
@@ -9152,8 +9229,696 @@ async function startInventoryScanner() {
     );
 
   }
+
 }
 
+  // Bước sau chúng ta sẽ tạo function này
+  scanInventoryNativeFrame();
+
+}
+
+// =====================================================
+// NATIVE BARCODE DETECTOR
+// =====================================================
+
+async function startInventoryNativeScanner() {
+
+  inventoryScannerMode =
+    'native';
+
+
+  const video =
+    document.getElementById(
+      'inventoryNativeVideo'
+    );
+
+
+  const reader =
+    document.getElementById(
+      'inventoryReader'
+    );
+
+
+  if (reader) {
+    reader.style.display =
+      'none';
+  }
+
+
+  if (video) {
+    video.style.display =
+      'block';
+  }
+
+
+  // ==========================================
+  // LOẠI BARCODE MUỐN QUÉT
+  // ==========================================
+
+  const wantedFormats = [
+    'code_128',
+    'ean_13',
+    'ean_8',
+    'code_39'
+  ];
+
+
+  let formats =
+    wantedFormats;
+
+
+  if (
+    BarcodeDetector.getSupportedFormats
+  ) {
+
+    const supported =
+      await BarcodeDetector
+        .getSupportedFormats();
+
+
+    formats =
+      wantedFormats.filter(
+        format =>
+          supported.includes(
+            format
+          )
+      );
+
+  }
+
+
+  if (
+    formats.length === 0
+  ) {
+
+    throw new Error(
+      'Trình duyệt không hỗ trợ barcode cần dùng'
+    );
+
+  }
+
+
+  inventoryNativeDetector =
+    new BarcodeDetector({
+      formats: formats
+    });
+
+
+  // ==========================================
+  // CAMERA SAU
+  // ==========================================
+
+  inventoryNativeStream =
+    await navigator.mediaDevices
+      .getUserMedia({
+
+        video: {
+
+          facingMode: {
+            ideal: 'environment'
+          },
+
+          width: {
+            ideal: 1280
+          },
+
+          height: {
+            ideal: 720
+          },
+
+          frameRate: {
+            ideal: 30,
+            max: 30
+          }
+
+        },
+
+        audio: false
+
+      });
+
+
+  video.srcObject =
+    inventoryNativeStream;
+
+
+  await video.play();
+
+
+  // ==========================================
+  // AUTOFOCUS
+  // ==========================================
+
+  try {
+
+    const track =
+      inventoryNativeStream
+        .getVideoTracks()[0];
+
+
+    const capabilities =
+      track.getCapabilities
+        ? track.getCapabilities()
+        : {};
+
+
+    if (
+      capabilities.focusMode &&
+      capabilities.focusMode.includes(
+        'continuous'
+      )
+    ) {
+
+      await track.applyConstraints({
+
+        advanced: [
+          {
+            focusMode:
+              'continuous'
+          }
+        ]
+
+      });
+
+    }
+
+  } catch (error) {
+
+    console.log(
+      'Không chỉnh được autofocus:',
+      error
+    );
+
+  }
+
+
+  inventoryNativeCanvas =
+    document.getElementById(
+      'inventoryNativeCanvas'
+    );
+
+
+  inventoryNativeBusy =
+    false;
+
+
+  setInventoryStatus(
+    '⚡ BARCODE NATIVE ĐÃ SẴN SÀNG\n' +
+    'Đưa barcode vào khung xanh'
+  );
+
+
+  scanInventoryNativeFrame();
+
+}
+
+// =====================================================
+// QUÉT FRAME BARCODE NATIVE
+// =====================================================
+
+async function scanInventoryNativeFrame() {
+
+  if (
+    !inventoryScannerRunning ||
+    inventoryScannerMode !==
+      'native' ||
+    !inventoryNativeDetector
+  ) {
+
+    return;
+
+  }
+
+
+  if (inventoryNativeBusy) {
+
+    inventoryNativeTimer =
+      setTimeout(
+        scanInventoryNativeFrame,
+        60
+      );
+
+    return;
+
+  }
+
+
+  const video =
+    document.getElementById(
+      'inventoryNativeVideo'
+    );
+
+
+  const canvas =
+    inventoryNativeCanvas;
+
+
+  if (
+    !video ||
+    !canvas ||
+    video.readyState < 2 ||
+    !video.videoWidth ||
+    !video.videoHeight
+  ) {
+
+    inventoryNativeTimer =
+      setTimeout(
+        scanInventoryNativeFrame,
+        80
+      );
+
+    return;
+
+  }
+
+
+  inventoryNativeBusy =
+    true;
+
+
+  try {
+
+    const videoWidth =
+      video.videoWidth;
+
+
+    const videoHeight =
+      video.videoHeight;
+
+
+    // ==========================================
+    // CHỈ LẤY VÙNG GIỮA CAMERA
+    // ==========================================
+
+    const cropWidth =
+      Math.floor(
+        videoWidth * 0.88
+      );
+
+
+    const cropHeight =
+      Math.floor(
+        videoHeight * 0.34
+      );
+
+
+    const cropX =
+      Math.floor(
+        (
+          videoWidth -
+          cropWidth
+        ) / 2
+      );
+
+
+    const cropY =
+      Math.floor(
+        (
+          videoHeight -
+          cropHeight
+        ) / 2
+      );
+
+
+    // ==========================================
+    // GIẢM KÍCH THƯỚC ẢNH
+    // ĐỂ DETECTOR XỬ LÝ NHANH HƠN
+    // ==========================================
+
+    const targetWidth =
+      Math.min(
+        900,
+        cropWidth
+      );
+
+
+    const targetHeight =
+      Math.max(
+        180,
+        Math.floor(
+          targetWidth *
+          cropHeight /
+          cropWidth
+        )
+      );
+
+
+    canvas.width =
+      targetWidth;
+
+
+    canvas.height =
+      targetHeight;
+
+
+    const ctx =
+      canvas.getContext(
+        '2d',
+        {
+          alpha: false
+        }
+      );
+
+
+    ctx.drawImage(
+
+      video,
+
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+
+      0,
+      0,
+      targetWidth,
+      targetHeight
+
+    );
+
+
+    const results =
+      await inventoryNativeDetector
+        .detect(
+          canvas
+        );
+
+
+    if (
+      results &&
+      results.length > 0
+    ) {
+
+      const barcode =
+        String(
+          results[0].rawValue ||
+          ''
+        ).trim();
+
+
+      if (barcode) {
+
+        inventoryNativeBusy =
+          false;
+
+
+        await onInventoryBarcodeSuccess(
+          barcode
+        );
+
+
+        return;
+
+      }
+
+    }
+
+  } catch (error) {
+
+    console.log(
+      'Native barcode detect:',
+      error
+    );
+
+  }
+
+
+  inventoryNativeBusy =
+    false;
+
+
+  if (
+    inventoryScannerRunning &&
+    inventoryScannerMode ===
+      'native'
+  ) {
+
+    inventoryNativeTimer =
+      setTimeout(
+        scanInventoryNativeFrame,
+        70
+      );
+
+  }
+
+}
+
+// =====================================================
+// HTML5-QRCODE FALLBACK
+// =====================================================
+
+async function startInventoryHtml5Fallback() {
+
+  inventoryScannerMode =
+    'html5';
+
+
+  const video =
+    document.getElementById(
+      'inventoryNativeVideo'
+    );
+
+
+  const reader =
+    document.getElementById(
+      'inventoryReader'
+    );
+
+
+  if (video) {
+    video.style.display =
+      'none';
+  }
+
+
+  if (reader) {
+    reader.style.display =
+      'block';
+  }
+
+
+  inventoryHtml5QrCode =
+    new Html5Qrcode(
+
+      'inventoryReader',
+
+      {
+
+        formatsToSupport: [
+
+          Html5QrcodeSupportedFormats
+            .CODE_128,
+
+          Html5QrcodeSupportedFormats
+            .EAN_13,
+
+          Html5QrcodeSupportedFormats
+            .EAN_8,
+
+          Html5QrcodeSupportedFormats
+            .CODE_39
+
+        ],
+
+        useBarCodeDetectorIfSupported:
+          true
+
+      }
+
+    );
+
+
+  await inventoryHtml5QrCode.start(
+
+    {
+      facingMode:
+        'environment'
+    },
+
+    {
+
+      fps:
+        12,
+
+      disableFlip:
+        true,
+
+      qrbox:
+        function(
+          viewfinderWidth,
+          viewfinderHeight
+        ) {
+
+          return {
+
+            width:
+              Math.min(
+                Math.floor(
+                  viewfinderWidth *
+                  0.88
+                ),
+                360
+              ),
+
+            height:
+              Math.min(
+                Math.floor(
+                  viewfinderHeight *
+                  0.30
+                ),
+                120
+              )
+
+          };
+
+        },
+
+      videoConstraints: {
+
+        facingMode: {
+          ideal:
+            'environment'
+        },
+
+        width: {
+          ideal:
+            1280
+        },
+
+        height: {
+          ideal:
+            720
+        },
+
+        frameRate: {
+          ideal:
+            30,
+          max:
+            30
+        }
+
+      }
+
+    },
+
+
+    onInventoryBarcodeSuccess,
+
+
+    function() {}
+
+  );
+
+
+  try {
+
+    const capabilities =
+      inventoryHtml5QrCode
+        .getRunningTrackCapabilities();
+
+
+    if (
+      capabilities.focusMode &&
+      capabilities.focusMode.includes(
+        'continuous'
+      )
+    ) {
+
+      await inventoryHtml5QrCode
+        .applyVideoConstraints({
+
+          advanced: [
+            {
+              focusMode:
+                'continuous'
+            }
+          ]
+
+        });
+
+    }
+
+  } catch (error) {
+
+    console.log(
+      'Fallback autofocus:',
+      error
+    );
+
+  }
+
+
+  setInventoryStatus(
+    '📷 Đang dùng scanner tương thích\n' +
+    'Đưa barcode vào khung'
+  );
+
+}
+
+// =====================================================
+// DỌN CAMERA NATIVE
+// =====================================================
+
+async function stopInventoryNativeOnly() {
+
+  inventoryNativeBusy =
+    false;
+
+
+  if (inventoryNativeTimer) {
+
+    clearTimeout(
+      inventoryNativeTimer
+    );
+
+    inventoryNativeTimer =
+      null;
+
+  }
+
+
+  if (inventoryNativeStream) {
+
+    inventoryNativeStream
+      .getTracks()
+      .forEach(
+        track =>
+          track.stop()
+      );
+
+    inventoryNativeStream =
+      null;
+
+  }
+
+
+  const video =
+    document.getElementById(
+      'inventoryNativeVideo'
+    );
+
+
+  if (video) {
+
+    try {
+      video.pause();
+    } catch (error) {}
+
+
+    video.srcObject =
+      null;
+
+
+    video.style.display =
+      'none';
+
+  }
+
+
+  inventoryNativeDetector =
+    null;
+
+}
 
 async function onInventoryBarcodeSuccess(
   decodedText
@@ -9211,56 +9976,158 @@ async function onInventoryBarcodeSuccess(
 
 async function stopInventoryScanner() {
 
-  if (!inventoryHtml5QrCode) {
-
-    inventoryScannerRunning =
-      false;
-
-    const box =
-      document.getElementById(
-        'inventoryScannerBox'
-      );
-
-    if (box) {
-      box.style.display =
-        'none';
-    }
-
-    return;
-  }
-
-
-  try {
-
-    if (inventoryScannerRunning) {
-      await inventoryHtml5QrCode.stop();
-    }
-
-  } catch (error) {
-    console.log(error);
-  }
-
-
-  try {
-    inventoryHtml5QrCode.clear();
-  } catch (error) {
-    console.log(error);
-  }
-
-
-  inventoryHtml5QrCode =
-    null;
-
   inventoryScannerRunning =
     false;
 
 
-  document.getElementById(
-    'inventoryScannerBox'
-  ).style.display =
-    'none';
-}
+  inventoryNativeBusy =
+    false;
 
+
+  // ==========================================
+  // DỪNG TIMER NATIVE
+  // ==========================================
+
+  if (inventoryNativeTimer) {
+
+    clearTimeout(
+      inventoryNativeTimer
+    );
+
+    inventoryNativeTimer =
+      null;
+
+  }
+
+
+  // ==========================================
+  // DỪNG CAMERA NATIVE
+  // ==========================================
+
+  if (inventoryNativeStream) {
+
+    inventoryNativeStream
+      .getTracks()
+      .forEach(
+        track =>
+          track.stop()
+      );
+
+    inventoryNativeStream =
+      null;
+
+  }
+
+
+  const nativeVideo =
+    document.getElementById(
+      'inventoryNativeVideo'
+    );
+
+
+  if (nativeVideo) {
+
+    try {
+      nativeVideo.pause();
+    } catch (error) {}
+
+
+    nativeVideo.srcObject =
+      null;
+
+
+    nativeVideo.style.display =
+      'none';
+
+  }
+
+
+  inventoryNativeDetector =
+    null;
+
+
+  // ==========================================
+  // DỪNG HTML5 FALLBACK
+  // ==========================================
+
+  if (inventoryHtml5QrCode) {
+
+    try {
+
+      await inventoryHtml5QrCode
+        .stop();
+
+    } catch (error) {
+
+      console.log(
+        'Stop html5 scanner:',
+        error
+      );
+
+    }
+
+
+    try {
+
+      inventoryHtml5QrCode
+        .clear();
+
+    } catch (error) {
+
+      console.log(
+        'Clear html5 scanner:',
+        error
+      );
+
+    }
+
+
+    inventoryHtml5QrCode =
+      null;
+
+  }
+
+
+  // ==========================================
+  // ẨN READER
+  // ==========================================
+
+  const reader =
+    document.getElementById(
+      'inventoryReader'
+    );
+
+
+  if (reader) {
+
+    reader.style.display =
+      'none';
+
+  }
+
+
+  // ==========================================
+  // ẨN KHUNG CAMERA
+  // ==========================================
+
+  const box =
+    document.getElementById(
+      'inventoryScannerBox'
+    );
+
+
+  if (box) {
+
+    box.style.display =
+      'none';
+
+  }
+
+
+  inventoryScannerMode =
+    '';
+
+}
 
 async function findInventoryProductByBarcode(
   barcode
