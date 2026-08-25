@@ -1725,6 +1725,159 @@ video {
     font-size: 36px;
   }
 }
+/* =========================
+   KHUNG QUÉT
+========================= */
+
+.scanner-stage {
+  position: relative;
+  width: 100%;
+  max-width: 420px;
+  margin: 14px auto 0;
+  border-radius: 18px;
+  overflow: hidden;
+  background: #000;
+}
+
+#reader {
+  width: 100%;
+  min-height: 320px;
+}
+
+.scan-overlay {
+  pointer-events: none;
+  position: absolute;
+  inset: 0;
+}
+
+.scan-overlay::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0,0,0,.38);
+}
+
+/* KHUNG CHUNG */
+.scan-frame {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  border: 3px solid #22c55e;
+  border-radius: 16px;
+  box-shadow: 0 0 0 9999px rgba(0,0,0,.28);
+  background: transparent;
+}
+
+/* 4 GÓC */
+.scan-frame::before,
+.scan-frame::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 16px;
+}
+
+/* QR: khung vuông */
+.scan-frame.qr {
+  width: 220px;
+  height: 220px;
+}
+
+/* BARCODE: khung ngang */
+.scan-frame.barcode {
+  width: 300px;
+  height: 120px;
+}
+
+.scan-tip {
+  position: absolute;
+  left: 50%;
+  bottom: 18px;
+  transform: translateX(-50%);
+  color: white;
+  font-size: 13px;
+  background: rgba(0,0,0,.45);
+  padding: 8px 12px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+/* ========================================
+   KHUNG QUÉT BARCODE KIỂM KHO
+======================================== */
+
+.inventory-reader-wrap {
+  position: relative;
+  width: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+  background: #000;
+}
+
+.inventory-scan-guide {
+  pointer-events: none;
+
+  position: absolute;
+
+  left: 50%;
+  top: 50%;
+
+  transform:
+    translate(-50%, -50%);
+
+  width: min(88%, 360px);
+  height: 120px;
+
+  border: 3px solid #22c55e;
+
+  border-radius: 14px;
+
+  box-shadow:
+    0 0 0 999px
+    rgba(0, 0, 0, .38);
+
+  z-index: 10;
+}
+
+
+/* VẠCH QUÉT Ở GIỮA */
+
+.inventory-scan-line {
+
+  position: absolute;
+
+  left: 7%;
+  right: 7%;
+
+  top: 50%;
+
+  height: 2px;
+
+  transform:
+    translateY(-50%);
+
+  background: #22c55e;
+
+  box-shadow:
+    0 0 10px
+    rgba(34, 197, 94, .9);
+
+}
+
+
+/* ẨN CÁC KHUNG MẶC ĐỊNH
+   DO THƯ VIỆN TỰ VẼ NẾU CÓ */
+
+#inventoryReader {
+  width: 100%;
+  overflow: hidden;
+  border-radius: 14px;
+}
+
+#inventoryReader video {
+  width: 100% !important;
+  object-fit: cover;
+}
 </style>
 
 
@@ -1824,16 +1977,26 @@ video {
     📷 QUÉT
   </button>
 
-</div><div id="scannerBox" class="scanner-box">
+</div>
+<div id="scannerBox" class="scanner-box">
 
-  <div class="scanner-title">
-    📦 Quét mã đơn
+  <div class="scanner-title" id="scannerTitle">
+    📦 Quét mã
   </div>
 
-  <div id="reader"></div>
+  <div class="scanner-stage">
+    <div id="reader"></div>
 
-  <div class="scanner-help">
-    Đưa barcode hoặc QR vào giữa khung hình
+    <div class="scan-overlay">
+      <div id="scanFrame" class="scan-frame qr"></div>
+      <div class="scan-tip" id="scanTip">
+        Đưa mã vào giữa khung
+      </div>
+    </div>
+  </div>
+
+  <div class="scanner-help" id="scannerHelp">
+    Đưa QR hoặc barcode vào đúng vùng quét
   </div>
 
   <button
@@ -2066,7 +2229,17 @@ video {
       </button>
     </div>
 
-    <div id="inventoryReader"></div>
+    <div class="inventory-reader-wrap">
+
+  <div id="inventoryReader"></div>
+
+  <div class="inventory-scan-guide">
+
+    <div class="inventory-scan-line"></div>
+
+  </div>
+
+</div>
 
   </div>
 
@@ -2826,33 +2999,61 @@ prepareBeep();
     facingMode: "environment"
   },
 
-  {
-    fps: 15,
+{
+  fps: 20,
 
-    disableFlip: true,
+  disableFlip: true,
 
-    videoConstraints: {
+  // CHỈ QUÉT TRONG KHUNG Ở GIỮA
+  qrbox: function(
+    viewfinderWidth,
+    viewfinderHeight
+  ) {
 
-      facingMode: {
-        ideal: "environment"
-      },
+    const width =
+      Math.min(
+        Math.floor(
+          viewfinderWidth * 0.82
+        ),
+        340
+      );
 
-      width: {
-        ideal: 1920
-      },
+    const height =
+      Math.min(
+        Math.floor(
+          viewfinderHeight * 0.38
+        ),
+        170
+      );
 
-      height: {
-        ideal: 1080
-      },
+    return {
+      width: width,
+      height: height
+    };
+  },
 
-      frameRate: {
-        ideal: 30,
-        max: 30
-      }
+  videoConstraints: {
 
+    facingMode: {
+      ideal: "environment"
+    },
+
+    width: {
+      ideal: 1920
+    },
+
+    height: {
+      ideal: 1080
+    },
+
+    frameRate: {
+      ideal: 30,
+      max: 30
     }
 
-  },
+  }
+
+},
 
   onScanSuccess,
 
@@ -8808,13 +9009,12 @@ async function startInventoryScanner() {
       new Html5Qrcode(
         'inventoryReader',
         {
-          formatsToSupport: [
-            Html5QrcodeSupportedFormats.CODE_128,
-            Html5QrcodeSupportedFormats.EAN_13,
-            Html5QrcodeSupportedFormats.EAN_8,
-            Html5QrcodeSupportedFormats.CODE_39,
-            Html5QrcodeSupportedFormats.QR_CODE
-          ],
+        formatsToSupport: [
+  Html5QrcodeSupportedFormats.CODE_128,
+  Html5QrcodeSupportedFormats.EAN_13,
+  Html5QrcodeSupportedFormats.EAN_8,
+  Html5QrcodeSupportedFormats.CODE_39
+],
           useBarCodeDetectorIfSupported:
             true
         }
@@ -8832,25 +9032,61 @@ async function startInventoryScanner() {
           'environment'
       },
 
-      {
-        fps: 15,
-        disableFlip: true,
-        videoConstraints: {
-          facingMode: {
-            ideal: 'environment'
-          },
-          width: {
-            ideal: 1920
-          },
-          height: {
-            ideal: 1080
-          },
-          frameRate: {
-            ideal: 30,
-            max: 30
-          }
-        }
-      },
+     {
+  fps: 20,
+
+  disableFlip: true,
+
+  // BARCODE → KHUNG NGANG
+  qrbox: function(
+    viewfinderWidth,
+    viewfinderHeight
+  ) {
+
+    const width =
+      Math.min(
+        Math.floor(
+          viewfinderWidth * 0.88
+        ),
+        360
+      );
+
+    const height =
+      Math.min(
+        Math.floor(
+          viewfinderHeight * 0.28
+        ),
+        120
+      );
+
+    return {
+      width: width,
+      height: height
+    };
+  },
+
+  videoConstraints: {
+
+    facingMode: {
+      ideal: 'environment'
+    },
+
+    width: {
+      ideal: 1920
+    },
+
+    height: {
+      ideal: 1080
+    },
+
+    frameRate: {
+      ideal: 30,
+      max: 30
+    }
+
+  }
+
+},
 
       onInventoryBarcodeSuccess,
 
