@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Kho - Hàng hoàn</title>
+<!-- BẢN ỔN ĐỊNH: WebM VP8 + 854x480 + 1 Mbps + tên file DD-MM-YYYY_MADON_TEN_KETQUA -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -4204,6 +4205,10 @@ let recorder = null;
 let chunks = [];
 let videoBlob = null;
 let result = null;
+
+// Mỗi video có 1 token cố định.
+// Retry cùng video sẽ dùng đúng tên file cũ.
+let returnVideoUploadToken = '';
 let recordingTimerInterval = null;
 let recordingStartTime = null;
 
@@ -6152,14 +6157,19 @@ async function openCamera(
                 cameraFacingMode
             },
 
+            // Chất lượng nhẹ để ưu tiên upload ổn định.
             width: {
               ideal:
-                1920
+                854,
+              max:
+                1280
             },
 
             height: {
               ideal:
-                1080
+                480,
+              max:
+                720
             },
 
             aspectRatio: {
@@ -6318,7 +6328,7 @@ async function openCamera(
               'fps'
             : ''
         ) +
-        ' · ghi hình chất lượng cao';
+        ' · chất lượng nhẹ, ưu tiên upload ổn định';
 
     }
 
@@ -6418,52 +6428,66 @@ function stopRecordingTimer() {
   recordingStartTime = null;
 }
 
-function getPreferredVideoBitrate() {
+function createReturnVideoUploadToken() {
+
+  const timePart =
+    Date.now()
+      .toString(36)
+      .toUpperCase();
+
+
+  let randomPart =
+    '';
+
 
   try {
 
-    const track =
-      stream &&
-      stream.getVideoTracks
-        ? stream
-            .getVideoTracks()[0]
-        : null;
+    const values =
+      new Uint32Array(2);
 
 
-    const settings =
-      track &&
-      track.getSettings
-        ? track.getSettings()
-        : {};
+    crypto.getRandomValues(
+      values
+    );
 
 
-    const width =
-      Number(
-        settings.width || 0
-      );
-
-
-    if (width >= 1700) {
-      return 2200000;
-    }
-
-
-    if (width >= 1100) {
-      return 1800000;
-    }
-
-
-    return 1400000;
-
+    randomPart =
+      Array.from(values)
+        .map(
+          value =>
+            value
+              .toString(36)
+              .toUpperCase()
+        )
+        .join('');
 
   } catch (error) {
 
-    return 1800000;
+    randomPart =
+      Math.random()
+        .toString(36)
+        .slice(2, 10)
+        .toUpperCase();
 
   }
 
+
+  return (
+    timePart +
+    '-' +
+    randomPart
+  );
+
 }
 
+
+function getPreferredVideoBitrate() {
+
+  // Bản nhẹ / ổn định:
+  // khoảng 1 Mbps, ưu tiên file nhỏ và upload nhanh.
+  return 1000000;
+
+}
 
 const MAX_SAFE_VIDEO_BYTES =
   25 * 1024 * 1024;
@@ -6520,15 +6544,17 @@ function getPreferredRecordingMimeType() {
 
   const candidates = [
 
-    'video/mp4;codecs=avc1.42E01E',
-
-    'video/mp4',
+    // Ưu tiên định dạng đã chạy ổn định trước đây.
+    'video/webm;codecs=vp8',
 
     'video/webm;codecs=vp9',
 
-    'video/webm;codecs=vp8',
+    'video/webm',
 
-    'video/webm'
+    // Chỉ fallback MP4 nếu trình duyệt không quay được WebM.
+    'video/mp4;codecs=avc1.42E01E',
+
+    'video/mp4'
 
   ];
 
@@ -6566,6 +6592,43 @@ function getPreferredRecordingMimeType() {
 
 
   return '';
+
+}
+
+
+function normalizeVideoMimeType(
+  mimeType
+) {
+
+  const mime =
+    String(
+      mimeType || ''
+    ).toLowerCase();
+
+
+  if (
+    mime.includes(
+      'webm'
+    )
+  ) {
+
+    return 'video/webm';
+
+  }
+
+
+  if (
+    mime.includes(
+      'mp4'
+    )
+  ) {
+
+    return 'video/mp4';
+
+  }
+
+
+  return 'video/webm';
 
 }
 
@@ -6734,6 +6797,12 @@ function startRecording() {
         );
 
 
+      // Token chỉ đổi khi có video quay MỚI.
+      // Bấm thử upload lại sẽ giữ nguyên token này.
+      returnVideoUploadToken =
+        createReturnVideoUploadToken();
+
+
       const preview =
         document.getElementById(
           'preview'
@@ -6814,6 +6883,11 @@ function startRecording() {
         '\nDung lượng: ' +
         sizeMB +
         ' MB' +
+        '\nĐịnh dạng: ' +
+        normalizeVideoMimeType(
+          videoBlob.type ||
+          recordingMimeType
+        ) +
         (
           uploadWarning
             ? '\n\n⚠️ VIDEO QUÁ NẶNG\n' +
@@ -6853,7 +6927,7 @@ function startRecording() {
   setStatus(
     '🔴 ĐANG QUAY...\n' +
     getCameraLabel() +
-    ' · chất lượng cao'
+    ' · chất lượng nhẹ'
   );
 
 }
@@ -6910,6 +6984,233 @@ async function checkDuplicateOrder(orderCode) {
   return data;
 }
 
+async function checkReturnUploadTarget() {
+
+  const response =
+    await fetch(
+      API_URL,
+      {
+        method:
+          'POST',
+
+        headers: {
+          'Content-Type':
+            'text/plain;charset=utf-8'
+        },
+
+        body:
+          JSON.stringify({
+            action:
+              'checkReturnUploadTarget'
+          })
+      }
+    );
+
+
+  const responseText =
+    await response.text();
+
+
+  let data;
+
+
+  try {
+
+    data =
+      JSON.parse(
+        responseText
+      );
+
+  } catch (error) {
+
+    throw new Error(
+      'Không đọc được phản hồi kiểm tra Drive. HTTP ' +
+      response.status
+    );
+
+  }
+
+
+  if (
+    !response.ok ||
+    !data.success
+  ) {
+
+    throw new Error(
+      data.error ||
+      (
+        'Không truy cập được thư mục Drive. HTTP ' +
+        response.status
+      )
+    );
+
+  }
+
+
+  return data;
+
+}
+
+
+async function verifyReturnVideoUploadOnce(
+  options
+) {
+
+  const response =
+    await fetch(
+      API_URL,
+      {
+        method:
+          'POST',
+
+        headers: {
+          'Content-Type':
+            'text/plain;charset=utf-8'
+        },
+
+        body:
+          JSON.stringify({
+            action:
+              'verifyReturnVideoUpload',
+            fileName:
+              options.fileName,
+            orderCode:
+              options.orderCode,
+            user:
+              options.user,
+            result:
+              options.result
+          })
+      }
+    );
+
+
+  const responseText =
+    await response.text();
+
+
+  let data;
+
+
+  try {
+
+    data =
+      JSON.parse(
+        responseText
+      );
+
+  } catch (error) {
+
+    throw new Error(
+      'Không đọc được phản hồi xác minh upload.'
+    );
+
+  }
+
+
+  if (
+    !response.ok ||
+    !data.success
+  ) {
+
+    throw new Error(
+      data.error ||
+      (
+        'Xác minh upload HTTP ' +
+        response.status
+      )
+    );
+
+  }
+
+
+  return data;
+
+}
+
+
+async function waitForReturnVideoVerification(
+  options
+) {
+
+  // Request upload có thể vẫn tiếp tục chạy trên Apps Script
+  // dù trình duyệt đã timeout. Vì vậy chờ và hỏi lại nhiều lần.
+  const totalAttempts =
+    6;
+
+
+  for (
+    let attempt = 1;
+    attempt <= totalAttempts;
+    attempt++
+  ) {
+
+    setStatus(
+      '🔎 ĐANG XÁC MINH VIDEO...\n' +
+      'Lần kiểm tra ' +
+      attempt +
+      '/' +
+      totalAttempts +
+      '\n\nKhông bấm upload lại lúc này.'
+    );
+
+
+    try {
+
+      const verification =
+        await verifyReturnVideoUploadOnce(
+          options
+        );
+
+
+      if (
+        verification.exists
+      ) {
+
+        return verification;
+
+      }
+
+    } catch (error) {
+
+      console.log(
+        'Xác minh upload lần ' +
+        attempt +
+        ' chưa thành công:',
+        error
+      );
+
+    }
+
+
+    if (
+      attempt <
+      totalAttempts
+    ) {
+
+      await new Promise(
+        resolve =>
+          setTimeout(
+            resolve,
+            3000
+          )
+      );
+
+    }
+
+  }
+
+
+  return {
+    success:
+      true,
+    exists:
+      false
+  };
+
+}
+
+
 async function uploadVideo() {
 
   const orderCode =
@@ -6931,34 +7232,34 @@ async function uploadVideo() {
 
 
   if (!orderCode) {
-    alert(
-      'Vui lòng nhập mã đơn'
-    );
+    alert('Vui lòng nhập mã đơn');
     return;
   }
 
 
   if (!user) {
-    alert(
-      'Vui lòng nhập người xử lý'
-    );
+    alert('Vui lòng nhập người xử lý');
     return;
   }
 
 
   if (!result) {
-    alert(
-      'Vui lòng chọn Đúng hoặc Sai'
-    );
+    alert('Vui lòng chọn Đúng hoặc Sai');
     return;
   }
 
 
   if (!videoBlob) {
-    alert(
-      'Chưa có video'
-    );
+    alert('Chưa có video');
     return;
+  }
+
+
+  if (!returnVideoUploadToken) {
+
+    returnVideoUploadToken =
+      createReturnVideoUploadToken();
+
   }
 
 
@@ -6975,13 +7276,8 @@ async function uploadVideo() {
       uploadSizeWarning
     );
 
-    setStatus(
-      '⚠️ VIDEO QUÁ NẶNG\n\n' +
-      uploadSizeWarning +
-      '\n\nVideo hiện tại vẫn được giữ lại.'
-    );
-
     return;
+
   }
 
 
@@ -7059,60 +7355,128 @@ async function uploadVideo() {
     '⏳ ĐANG UPLOAD...';
 
 
-  try {
+  const now =
+    new Date();
 
-    setStatus(
-      '⏳ Đang chuẩn bị video...\n' +
-      'Dung lượng file: ' +
-      formatFileSize(
-        videoBlob.size
-      ) +
-      '\nVui lòng không đóng trang'
+
+  const day =
+    String(
+      now.getDate()
+    ).padStart(
+      2,
+      '0'
     );
 
 
-    // Chỉ convert video thành Base64 tại thời điểm upload.
+  const month =
+    String(
+      now.getMonth() + 1
+    ).padStart(
+      2,
+      '0'
+    );
+
+
+  const year =
+    now.getFullYear();
+
+
+  const uploadMimeType =
+    normalizeVideoMimeType(
+      videoBlob.type ||
+      recordingMimeType
+    );
+
+
+  const extension =
+    getVideoFileExtension(
+      uploadMimeType
+    );
+
+
+  // Token giúp backend nhận ra retry của CÙNG video.
+  const fileName =
+    `${day}-${month}-${year}_${orderCode}_${user}_${result}.${extension}`;
+
+
+  const verificationOptions = {
+    fileName:
+      fileName,
+    orderCode:
+      orderCode,
+    user:
+      user,
+    result:
+      result
+  };
+
+
+  try {
+
+    setStatus(
+      '🔎 Đang kiểm tra thư mục Google Drive...'
+    );
+
+
+    const driveTarget =
+      await checkReturnUploadTarget();
+
+
+    setStatus(
+      '✅ Đã kết nối Drive\n' +
+      'Thư mục: ' +
+      (
+        driveTarget.folderName ||
+        'Không xác định'
+      ) +
+      '\n\n⏳ Đang chuẩn bị video...\n' +
+      'Dung lượng file: ' +
+      formatFileSize(
+        videoBlob.size
+      )
+    );
+
+
+    // Trước khi gửi lại, kiểm tra xem request trước
+    // đã tạo video rồi hay chưa.
+    const existingBeforeUpload =
+      await verifyReturnVideoUploadOnce(
+        verificationOptions
+      );
+
+
+    if (
+      existingBeforeUpload.exists
+    ) {
+
+      setStatus(
+        '✅ VIDEO ĐÃ CÓ TRÊN DRIVE\n\n' +
+        'Không upload trùng.\n' +
+        (
+          existingBeforeUpload.sheetRecorded
+            ? '✅ HANG_HOAN đã được ghi.'
+            : '⚠️ Video có trên Drive nhưng chưa xác nhận được dòng Sheet.'
+        ) +
+        '\n\n⏳ Chuẩn bị đơn tiếp theo...'
+      );
+
+
+      setTimeout(
+        () =>
+          nextOrder(),
+        1800
+      );
+
+
+      return;
+
+    }
+
+
     const base64 =
       await blobToBase64(
         videoBlob
       );
-
-
-    const now =
-      new Date();
-
-
-    const day =
-      String(
-        now.getDate()
-      ).padStart(
-        2,
-        '0'
-      );
-
-
-    const month =
-      String(
-        now.getMonth() + 1
-      ).padStart(
-        2,
-        '0'
-      );
-
-
-    const year =
-      now.getFullYear();
-
-
-    const extension =
-      getVideoFileExtension(
-        videoBlob.type ||
-        recordingMimeType
-      );
-
-
-    const fileName =
-      `${day}-${month}-${year}_${orderCode}_${result}_${user}.${extension}`;
 
 
     setStatus(
@@ -7121,11 +7485,8 @@ async function uploadVideo() {
       formatFileSize(
         videoBlob.size
       ) +
-      '\nDữ liệu gửi: khoảng ' +
-      estimatedBase64SizeMb(
-        videoBlob.size
-      ) +
-      ' MB' +
+      '\nĐịnh dạng: ' +
+      uploadMimeType +
       '\n\nVui lòng không đóng trang'
     );
 
@@ -7151,7 +7512,6 @@ async function uploadVideo() {
         await fetch(
           API_URL,
           {
-
             method:
               'POST',
 
@@ -7172,12 +7532,9 @@ async function uploadVideo() {
                 result,
                 fileName,
                 mimeType:
-                  videoBlob.type ||
-                  recordingMimeType ||
-                  'video/webm',
+                  uploadMimeType,
                 base64
               })
-
           }
         );
 
@@ -7205,39 +7562,19 @@ async function uploadVideo() {
           responseText
         );
 
-
     } catch (parseError) {
 
-      const shortResponse =
-        String(
-          responseText || ''
-        )
-          .replace(
-            /\s+/g,
-            ' '
-          )
-          .slice(
-            0,
-            220
-          );
-
-
       throw new Error(
-        'Server không trả JSON hợp lệ.' +
-        '\nHTTP ' +
-        response.status +
-        (
-          shortResponse
-            ? '\n' +
-              shortResponse
-            : ''
-        )
+        'Mất phản hồi sau khi gửi video.'
       );
 
     }
 
 
-    if (!response.ok) {
+    if (
+      !response.ok ||
+      !data.success
+    ) {
 
       throw new Error(
         data.error ||
@@ -7250,42 +7587,83 @@ async function uploadVideo() {
     }
 
 
-    if (!data.success) {
-
-      throw new Error(
-        data.error ||
-        'Lỗi không xác định'
-      );
-
-    }
-
-
     setStatus(
       '✅ HOÀN TẤT\n\n' +
       'Mã đơn: ' +
       orderCode +
-      '\nĐã upload video thành công' +
+      '\nVideo đã có trên Google Drive.' +
+      (
+        data.sheetRecorded === false
+          ? '\n⚠️ Video đã lưu nhưng ghi Sheet chưa hoàn tất.'
+          : '\n✅ HANG_HOAN đã ghi nhận.'
+      ) +
+      (
+        data.reusedExisting
+          ? '\n\n♻️ Đã dùng video có sẵn, không tạo file trùng.'
+          : ''
+      ) +
       '\n\n⏳ Chuẩn bị đơn tiếp theo...'
     );
 
 
-    console.log(
-      'UPLOAD VIDEO COMPLETE',
-      data
-    );
-
-
     setTimeout(
-      () => {
-
-        nextOrder();
-
-      },
-      1500
+      () =>
+        nextOrder(),
+      1800
     );
 
 
   } catch (error) {
+
+    // =================================================
+    // KHÔNG GỌI ĐÂY LÀ "THẤT BẠI" NGAY.
+    // Fetch timeout không đồng nghĩa Apps Script đã dừng.
+    // Hỏi lại Drive trước.
+    // =================================================
+
+    setStatus(
+      '⚠️ CHƯA NHẬN ĐƯỢC PHẢN HỒI\n\n' +
+      'Web đang kiểm tra xem video đã lên Drive chưa...'
+    );
+
+
+    const verification =
+      await waitForReturnVideoVerification(
+        verificationOptions
+      );
+
+
+    if (
+      verification.exists
+    ) {
+
+      setStatus(
+        '✅ VIDEO ĐÃ UPLOAD THÀNH CÔNG\n\n' +
+        'Phản hồi lúc đầu bị chậm/mất nhưng video đã có trên Drive.' +
+        (
+          verification.sheetRecorded
+            ? '\n✅ HANG_HOAN đã ghi nhận.'
+            : '\n⚠️ Video đã có trên Drive nhưng Sheet chưa xác nhận.'
+        ) +
+        '\n\n⏳ Chuẩn bị đơn tiếp theo...'
+      );
+
+
+      uploadButton.disabled =
+        true;
+
+
+      setTimeout(
+        () =>
+          nextOrder(),
+        2200
+      );
+
+
+      return;
+
+    }
+
 
     let errorMessage =
       error &&
@@ -7293,7 +7671,7 @@ async function uploadVideo() {
         ? error.message
         : String(
             error ||
-            'Lỗi không xác định'
+            'Không xác định'
           );
 
 
@@ -7304,33 +7682,18 @@ async function uploadVideo() {
     ) {
 
       errorMessage =
-        'Upload quá lâu và đã hết thời gian chờ.';
+        'Trình duyệt đã hết thời gian chờ phản hồi.';
 
     }
 
 
     setStatus(
-      '❌ UPLOAD THẤT BẠI\n\n' +
+      '⚠️ CHƯA XÁC NHẬN ĐƯỢC UPLOAD\n\n' +
       errorMessage +
-      '\n\n✅ Video vẫn được giữ lại.' +
-      '\nBạn có thể bấm THỬ UPLOAD LẠI.'
-    );
-
-
-    console.error(
-      'UPLOAD VIDEO FAILED',
-      {
-        error:
-          error,
-        videoBytes:
-          videoBlob
-            ? videoBlob.size
-            : 0,
-        videoType:
-          videoBlob
-            ? videoBlob.type
-            : ''
-      }
+      '\n\nSau nhiều lần kiểm tra vẫn chưa thấy file trên Drive.' +
+      '\nVideo vẫn được giữ lại.' +
+      '\n\nBạn có thể bấm THỬ UPLOAD LẠI.' +
+      '\nHệ thống sẽ kiểm tra file cũ trước nên không tạo video trùng.'
     );
 
 
@@ -7339,7 +7702,7 @@ async function uploadVideo() {
 
 
     uploadButton.innerText =
-      '🔁 THỬ UPLOAD LẠI';
+      '🔁 KIỂM TRA / THỬ UPLOAD LẠI';
 
   }
 
@@ -7371,6 +7734,7 @@ function nextOrder() {
 
   videoBlob = null;
   chunks = [];
+  returnVideoUploadToken = '';
 
   const preview =
     document.getElementById('preview');
